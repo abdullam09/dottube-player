@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<title>DotTube Player Relay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<!--
+  DotTube player relay.
+
+  iCUE loads widgets from file://, so a YouTube embed opened directly by the
+  widget sends no Referer and YouTube may refuse it (error 153). Host this one
+  file on any HTTPS static host (GitHub Pages, Cloudflare Pages, Netlify) and
+  put its URL in the widget's "Player Relay URL" setting. The widget then
+  embeds this page, this page embeds YouTube with a real origin, and player
+  messages are forwarded unchanged in both directions.
+
+  Only the video id and player options pass through; nothing is stored or logged.
+-->
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var id = params.get('v') || '';
+  if (!/^[A-Za-z0-9_-]{6,20}$/.test(id)) {
+    document.body.textContent = '';
+    return;
+  }
+  var allowed = ['autoplay', 'start', 'playsinline', 'rel', 'iv_load_policy', 'fs', 'enablejsapi', 'cc_load_policy', 'hl'];
+  var q = new URLSearchParams();
+  allowed.forEach(function (k) { if (params.has(k)) q.set(k, params.get(k)); });
+  q.set('enablejsapi', '1');
+  q.set('origin', location.origin);
+
+  var frame = document.createElement('iframe');
+  frame.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(id) + '?' + q.toString();
+  frame.allow = 'autoplay; encrypted-media; picture-in-picture; clipboard-write';
+  frame.referrerPolicy = 'strict-origin-when-cross-origin';
+  frame.title = 'YouTube video player';
+  document.body.appendChild(frame);
+
+  window.addEventListener('message', function (e) {
+    if (e.source === frame.contentWindow) {
+      // YouTube -> widget
+      if (window.parent !== window) window.parent.postMessage(e.data, '*');
+    } else if (e.source === window.parent) {
+      // widget -> YouTube: only the player protocol, nothing else.
+      var data = e.data;
+      try { data = typeof data === 'string' ? JSON.parse(data) : data; } catch (err) { return; }
+      if (!data || (data.event !== 'listening' && data.event !== 'command')) return;
+      frame.contentWindow.postMessage(JSON.stringify(data), 'https://www.youtube-nocookie.com');
+    }
+  });
+})();
+</script>
+</body>
+</html>
